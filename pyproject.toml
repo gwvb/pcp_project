@@ -1,10 +1,9 @@
 [project]
-name = "programmingcourse"
+name = "pcp-project"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy>=2.4.0",
-    "pytest>=9.0.0",
+    "numpy>=2.4.0", ,
     "scikit-learn>=1.9.0",
     "scipy>=1.17.0",
 ]

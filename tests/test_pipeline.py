@@ -1,6 +1,5 @@
 # tests/test_subject_pipeline.py
 import copy
-
 import numpy as np
 import pytest
 from sklearn.base import BaseEstimator, TransformerMixin, ClassifierMixin
@@ -17,7 +16,7 @@ class RecordingTransformer(BaseEstimator, TransformerMixin):
 
     # dimension of X and Y don't change after fitting a model on the data
     # fit log regression etc
-    def fit(self, X, y=None):
+    def fit(self, X, y=None, **kwargs):
         self.fit_called_ = True
         self.fit_X_ = np.array(X, copy=True)
         self.fit_y_ = None if y is None else np.array(y, copy=True)

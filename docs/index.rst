@@ -4,7 +4,7 @@
    contain the root `toctree` directive.
 
 PCP Pipeline documentation!
-========================================================
+============================================
 
 .. toctree::
    :maxdepth: 2
@@ -18,3 +18,9 @@ Pipeline Reference
    :undoc-members:
    :show-inheritance:
    :special-members: __init__
+
+Indices
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`

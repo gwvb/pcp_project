@@ -1,20 +1,26 @@
-PCP EEG Pipeline
-================
+.. Programming Course Pipeline documentation master file, created by
+   sphinx-quickstart on Mon Jul 13 2026.
+   You can adapt this file completely to your liking, but it should at least
+   contain the root `toctree` directive.
 
-Learn how to classify subjects from eyes-open and eyes-closed EEG recordings.
-Build features from short windows and evaluate models without mixing subjects across folds.
+PCP Pipeline documentation!
+============================================
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents
+   :caption: Contents: 
 
-   usage
-   classification
-   examples
-   api
+Pipeline Reference
+==================
+
+.. automodule:: pipeline
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :special-members: __init__
 
 Indices
--------
+==================
 
 * :ref:`genindex`
 * :ref:`modindex`

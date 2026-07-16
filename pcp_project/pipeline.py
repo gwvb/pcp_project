@@ -1,8 +1,12 @@
-import numpy as np
+"""Build the pipeline."""
+
 import inspect
+
+import numpy as np
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.metaestimators import available_if
+from sklearn.utils.validation import check_is_fitted
 
 from _helpers import (
     _final_estimator_has,
@@ -13,16 +17,18 @@ from _helpers import (
 
 class SubjectPipeline(Pipeline):
     """
-    A custom scikit-learn Pipeline that supports subject-level/group-level scoring
+    A custom scikit-learn Pipeline.
+
+    Supports subject-level/group-level scoring
     by aggregating window-level or sample-level predictions.
+
+    Parameters
+    ----------
+        steps (list of tuple) : List of (name, transform) tuples.
+        mask (array-like, optional) : Optional mask filtering for a desired state.
     """
 
     def __init__(self, steps, mask=None):
-        """
-        Parameters
-        steps (list of tuple) : List of (name, transform) tuples.
-        mask (array-like, optional) : Optional mask filtering for a desired state.
-        """
         super().__init__(steps)
         self.mask = mask
 
@@ -40,12 +46,14 @@ class SubjectPipeline(Pipeline):
         Fit all the transformers, then fit the final estimator.
 
         Parameters
+        ----------
         X (array) : Training data. (n_subj,n_trials,n_channels)
         y (array) : Training targets. (n_subject,n_trials), optional
 
         **fit_params (dict) : Parameters passed to the fit method of each step.
 
         Returns
+        -------
         self : This fitted pipeline.
         """
         if len(self.steps) == 0:
@@ -67,9 +75,11 @@ class SubjectPipeline(Pipeline):
         Apply transforms sequentially.
 
         Parameters
+        ----------
         X (array) : Data to transform. (n_subj,n_trials,n_channels)
 
         Returns
+        -------
         Xt (array) : Transformed data. (n_subj,n_trials,n_channels)
         """
         check_is_fitted(self, "is_fitted_")
@@ -100,11 +110,13 @@ class SubjectPipeline(Pipeline):
         Transform the input data and make predictions using the final estimator.
 
         Parameters
+        ----------
         X (array) : Data to predict. (n_subj,n_trials,n_channels)
 
         **predict_params (dict) : Parameters for prediction step.
 
         Returns
+        -------
         Call of predict method of final estimator.
 
         """
@@ -160,17 +172,23 @@ class SubjectPipeline(Pipeline):
         return self._call_final("decision_function", X, predict_params)
 
     def _fit(self, X, y=None, **fit_params):
-        """Fit the pipeline except the last step. Difference to the sci-kit learn Pipeline class method _fit is that
-        the mask attribute is potentially manipulated by the transformer and, in case, updated.
+        """
+        Fit the pipeline except the last step.
+
+        Difference to the sci-kit learn Pipeline class method _fit is that the mask
+        attribute is potentially manipulated by the transformer and, in case, updated.
 
         Parameters
+        ----------
         X (array) : Training data. (n_subj,n_trials,n_channels)
         y (array) : Training targets. (n_subject,n_trials), optional
 
         **fit_params (dict) : Parameters passed to the fit method of each step.
 
         Returns
-        Xt, yt, final_fit_params (tuple) : Transformed data and final fit parameters for classification step.
+        -------
+        Xt, yt, final_fit_params (tuple) : Transformed data and final fit parameters
+        for classification step.
         """
         self.steps = list(self.steps)
 

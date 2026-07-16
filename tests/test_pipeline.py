@@ -1,11 +1,10 @@
 # tests/test_subject_pipeline.py
-import copy
 import numpy as np
 import pytest
-from sklearn.base import BaseEstimator, TransformerMixin, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.exceptions import NotFittedError
 
-from pipeline import SubjectPipeline
+from pcp_project.pipeline import SubjectPipeline
 
 
 class RecordingTransformer(BaseEstimator, TransformerMixin):
@@ -122,7 +121,7 @@ def test_transform_before_fit_raises(simple_pipeline, Xy):
 
 #
 def test_fit_applies_transformers_in_order_and_passes_transformed_X_to_final_estimator(
-        simple_pipeline, Xy
+    simple_pipeline, Xy
 ):
     X, y = Xy
     simple_pipeline.fit(X, y)
@@ -130,22 +129,18 @@ def test_fit_applies_transformers_in_order_and_passes_transformed_X_to_final_est
     expected_after_t1 = X + 1
     expected_after_t2 = X + 1 + 2
 
-    np.testing.assert_array_equal(
-        simple_pipeline.named_steps["t1"].fit_transform_X_, X
-    )
+    np.testing.assert_array_equal(simple_pipeline.named_steps["t1"].fit_transform_X_, X)
     np.testing.assert_array_equal(
         simple_pipeline.named_steps["t2"].fit_transform_X_, expected_after_t1
     )
     np.testing.assert_array_equal(
         simple_pipeline.named_steps["clf"].fit_X_, expected_after_t2
     )
-    np.testing.assert_array_equal(
-        simple_pipeline.named_steps["clf"].fit_y_, y
-    )
+    np.testing.assert_array_equal(simple_pipeline.named_steps["clf"].fit_y_, y)
 
 
 def test_predict_transforms_with_non_final_steps_then_calls_final_estimator(
-        simple_pipeline, Xy
+    simple_pipeline, Xy
 ):
     X, y = Xy
     simple_pipeline.fit(X, y)
@@ -153,12 +148,8 @@ def test_predict_transforms_with_non_final_steps_then_calls_final_estimator(
 
     expected_Xt = X + 1 + 2
 
-    np.testing.assert_array_equal(
-        simple_pipeline.named_steps["t1"].transform_X_, X
-    )
-    np.testing.assert_array_equal(
-        simple_pipeline.named_steps["t2"].transform_X_, X + 1
-    )
+    np.testing.assert_array_equal(simple_pipeline.named_steps["t1"].transform_X_, X)
+    np.testing.assert_array_equal(simple_pipeline.named_steps["t2"].transform_X_, X + 1)
     np.testing.assert_array_equal(
         simple_pipeline.named_steps["clf"].predict_X_, expected_Xt
     )
@@ -190,11 +181,15 @@ def test_fit_forwards_step_params_to_final_estimator(mask, Xy):
         mask=mask,
     )
 
-    Xt, yt, final_fit_params = pipe._fit(X, y, clf__sample_weight=np.array([1.0, 2.0, 3.0]))
+    Xt, yt, final_fit_params = pipe._fit(
+        X, y, clf__sample_weight=np.array([1.0, 2.0, 3.0])
+    )
 
     np.testing.assert_array_equal(Xt, X + 1)
     np.testing.assert_array_equal(yt, y)
-    np.testing.assert_array_equal(final_fit_params["sample_weight"], np.array([1.0, 2.0, 3.0]))
+    np.testing.assert_array_equal(
+        final_fit_params["sample_weight"], np.array([1.0, 2.0, 3.0])
+    )
 
 
 def test_fit_updates_X(Xy):
@@ -202,7 +197,7 @@ def test_fit_updates_X(Xy):
     pipe = SubjectPipeline(
         steps=[
             ("t1", RecordingTransformer(add=1, name="t1", return_tuple=False)),
-            ("clf", RecordingEstimator())
+            ("clf", RecordingEstimator()),
         ]
     )
     pipe.fit(X, y)
@@ -214,9 +209,9 @@ def test_transform_updates_mask(mask, Xy):
     pipe = SubjectPipeline(
         steps=[
             ("t1", RecordingTransformer(add=1, name="t1", return_tuple=True)),
-            ("clf", RecordingEstimator())
+            ("clf", RecordingEstimator()),
         ],
-        mask=mask
+        mask=mask,
     )
     pipe.fit(X, y)
     _ = pipe.transform(X, y)
@@ -253,11 +248,13 @@ def test_mask_is_stored(mask):
 
 
 def test_fit_accepts_nan_padded_X(mask):
-    X = np.array([
-        [1.0, 2.0],
-        [3.0, np.nan],
-        [np.nan, np.nan],
-    ])
+    X = np.array(
+        [
+            [1.0, 2.0],
+            [3.0, np.nan],
+            [np.nan, np.nan],
+        ]
+    )
     y = np.array([0, 1, 0])
 
     pipe = SubjectPipeline(
@@ -273,11 +270,13 @@ def test_fit_accepts_nan_padded_X(mask):
 
 
 def test_predict_accepts_nan_padded_X(mask):
-    X = np.array([
-        [1.0, 2.0],
-        [3.0, np.nan],
-        [np.nan, np.nan],
-    ])
+    X = np.array(
+        [
+            [1.0, 2.0],
+            [3.0, np.nan],
+            [np.nan, np.nan],
+        ]
+    )
     y = np.array([0, 1, 0])
 
     pipe = SubjectPipeline(
@@ -295,11 +294,13 @@ def test_predict_accepts_nan_padded_X(mask):
 
 
 def test_nan_values_are_forwarded_to_final_estimator(mask):
-    X = np.array([
-        [1.0, 2.0],
-        [3.0, np.nan],
-        [np.nan, np.nan],
-    ])
+    X = np.array(
+        [
+            [1.0, 2.0],
+            [3.0, np.nan],
+            [np.nan, np.nan],
+        ]
+    )
     y = np.array([0, 1, 0])
 
     pipe = SubjectPipeline(
@@ -321,6 +322,7 @@ def test_nan_values_are_forwarded_to_final_estimator(mask):
 # directly sets self.is_fitted_ = True, returns itself
 # predict raises AttributeError
 
+
 def test_empty_pipeline(Xy):
     X, y = Xy
     pipe = SubjectPipeline(steps=[])
@@ -332,7 +334,9 @@ def test_empty_pipeline(Xy):
     np.testing.assert_array_equal(pipe.transform(X), X)
 
     # Predicting raises AttributeError as there is no final estimator
-    with pytest.raises(AttributeError, match="The final step does not implement predict"):
+    with pytest.raises(
+        AttributeError, match="The final step does not implement predict"
+    ):
         pipe.predict(X)
 
 
@@ -340,6 +344,7 @@ def test_empty_pipeline(Xy):
 # without final classifier. final step set to None or "passthrough"
 # final estimator(classifier) doesn't exist. end goal is not a
 # yes or no, but a transformed data
+
 
 # pipeline succesfully fitted
 # pipeline can transform correctly
@@ -361,7 +366,9 @@ def test_pipeline_with_none_final_step(final_step, Xy):
     np.testing.assert_array_equal(pipe.transform(X), X + 1)
 
     # predict raises error
-    with pytest.raises(AttributeError, match="The final step does not implement predict"):
+    with pytest.raises(
+        AttributeError, match="The final step does not implement predict"
+    ):
         pipe.predict(X)
 
 
@@ -373,7 +380,9 @@ def test_fit_invalid_parameters_raise_value_error(simple_pipeline, Xy):
 
     # Parameter without double underscores '__'
     # _fit function splits each parameter name by "__"
-    with pytest.raises(ValueError, match="Fit parameters must use the step__param format"):
+    with pytest.raises(
+        ValueError, match="Fit parameters must use the step__param format"
+    ):
         simple_pipeline.fit(X, y, invalid_param_name=True)
 
     # Parameter with an unknown step name "non_existent_step"

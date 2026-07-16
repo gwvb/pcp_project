@@ -176,41 +176,6 @@ class SubjectPipeline(Pipeline):
         """Compute decision scores while preserving transformed metadata."""
         return self._call_final("decision_function", X, predict_params)
 
-    def _majority_vote_by_group(self, values, groups):
-        values = np.asarray(values)
-        groups = np.asarray(groups)
-
-        unique_groups = []
-        grouped_values = []
-
-        for g in groups:
-            if g not in unique_groups:
-                unique_groups.append(g)
-
-        for g in unique_groups:
-            vals = values[groups == g]
-            vals = vals[~self._is_nan_label_array(vals)]
-            if len(vals) == 0:
-                raise ValueError(
-                    f"Group {g!r} contains no valid labels after filtering."
-                )
-            grouped_values.append(self._majority_vote(vals))
-
-        return np.asarray(grouped_values)
-
-    @staticmethod
-    def _majority_vote(values):
-        values = np.asarray(values)
-        uniq, counts = np.unique(values, return_counts=True)
-        return uniq[np.argmax(counts)]
-
-    @staticmethod
-    def _is_nan_label_array(values):
-        values = np.asarray(values)
-        if np.issubdtype(values.dtype, np.floating):
-            return np.isnan(values)
-        return np.zeros(values.shape, dtype=bool)
-
     def _fit(self, X, y=None, **fit_params):
         """
         Fit the pipeline except the last step.

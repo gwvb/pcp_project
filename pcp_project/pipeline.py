@@ -2,31 +2,20 @@ import numpy as np
 import inspect
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
-from sklearn.metrics import accuracy_score
 from sklearn.utils.metaestimators import available_if
 
-from ._helpers import (
-    _declares_param,
+from _helpers import (
     _final_estimator_has,
-    _metadata_kwargs,
     _split_input,
     _transform_one,
 )
+
 
 class SubjectPipeline(Pipeline):
     """
     A custom scikit-learn Pipeline that supports subject-level/group-level scoring
     by aggregating window-level or sample-level predictions.
     """
-    
-    @staticmethod
-    def accepts_param(func, param_name):
-      """Return whether a callable accepts a named argument or ``**kwargs``."""
-      sig = inspect.signature(func)
-      params = sig.parameters
-      return param_name in params or any(
-          p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
-    )
 
     def __init__(self, steps, mask=None):
         """
@@ -36,7 +25,16 @@ class SubjectPipeline(Pipeline):
         """
         super().__init__(steps)
         self.mask = mask
-  
+
+    @staticmethod
+    def accepts_param(func, param_name):
+        """Return whether a callable accepts a named argument or ``**kwargs``."""
+        sig = inspect.signature(func)
+        params = sig.parameters
+        return param_name in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
     def fit(self, X, y=None, **fit_params):
         """
         Fit all the transformers, then fit the final estimator.
@@ -56,16 +54,13 @@ class SubjectPipeline(Pipeline):
 
         Xt, yt, final_fit_params = self._fit(X, y, **fit_params)
 
-        # FIX(ref): Preserve transformed groups for group-aware final estimators.
-        final_groups = self.__dict__.pop("_fit_groups_")
         if self._final_estimator not in (None, "passthrough"):
-            if _declares_param(self._final_estimator.fit, "groups"):
-                final_fit_params.setdefault("groups", final_groups)
+            if self.accepts_param(self._final_estimator.fit, "groups"):
+                final_fit_params.setdefault("groups", self.mask)
             self._final_estimator.fit(Xt, yt, **final_fit_params)
 
         self.is_fitted_ = True
         return self
-
 
     def transform(self, X, y=None):
         """
@@ -100,7 +95,6 @@ class SubjectPipeline(Pipeline):
                 Xt = final.transform(Xt, y)
         return Xt
 
-
     def predict(self, X, **predict_params):
         """
         Transform the input data and make predictions using the final estimator.
@@ -127,8 +121,6 @@ class SubjectPipeline(Pipeline):
 
         return self._final_estimator.predict(Xt, **predict_params)
 
-        # FIX(ref): Override sklearn's incompatible private ``_fit`` invocation.
-
     def fit_transform(self, X, y=None, **fit_params):
         """Fit the pipeline and transform the original input."""
         return self.fit(X, y, **fit_params).transform(X, y)
@@ -141,7 +133,7 @@ class SubjectPipeline(Pipeline):
         """Fit all steps and return the final estimator's training predictions."""
         Xt, yt, final_fit_params = self._fit(X, y, **fit_params)
         final_groups = self.__dict__.pop("_fit_groups_")
-        if _declares_param(self._final_estimator.fit_predict, "groups"):
+        if self.accepts_param(self._final_estimator.fit_predict, "groups"):
             final_fit_params.setdefault("groups", final_groups)
         predictions = self._final_estimator.fit_predict(
             Xt,
@@ -167,42 +159,6 @@ class SubjectPipeline(Pipeline):
         """Compute decision scores while preserving transformed metadata."""
         return self._call_final("decision_function", X, predict_params)
 
-    def _majority_vote_by_group(self, values, groups):
-        values = np.asarray(values)
-        groups = np.asarray(groups)
-
-        unique_groups = []
-        grouped_values = []
-
-        for g in groups:
-            if g not in unique_groups:
-                unique_groups.append(g)
-
-        for g in unique_groups:
-            vals = values[groups == g]
-            vals = vals[~self._is_nan_label_array(vals)]
-            if len(vals) == 0:
-                raise ValueError(
-                    f"Group {g!r} contains no valid labels after filtering."
-                )
-            grouped_values.append(self._majority_vote(vals))
-
-        return np.asarray(grouped_values)
-
-    @staticmethod
-    def _majority_vote(values):
-        values = np.asarray(values)
-        uniq, counts = np.unique(values, return_counts=True)
-        return uniq[np.argmax(counts)]
-
-    @staticmethod
-    def _is_nan_label_array(values):
-        values = np.asarray(values)
-        if np.issubdtype(values.dtype, np.floating):
-            return np.isnan(values)
-        return np.zeros(values.shape, dtype=bool)
-
-
     def _fit(self, X, y=None, **fit_params):
         """Fit the pipeline except the last step. Difference to the sci-kit learn Pipeline class method _fit is that
         the mask attribute is potentially manipulated by the transformer and, in case, updated.
@@ -226,9 +182,7 @@ class SubjectPipeline(Pipeline):
         Xt, yt = X, y
 
         fit_params_steps = {
-            name: {}
-            for name, step in self.steps
-            if step not in (None, "passthrough")
+            name: {} for name, step in self.steps if step not in (None, "passthrough")
         }
 
         for pname, pval in fit_params.items():
@@ -246,14 +200,10 @@ class SubjectPipeline(Pipeline):
                 continue
             step_params = fit_params_steps.get(name, {})
 
-            # FIX(ref): Route metadata separately to ``fit`` and ``transform``.
-            # FIX(ref): Do not pass stale subject targets into row-level fits.
-            fit_kwargs = _metadata_kwargs(transformer.fit, Xt, yt, self.mask)
-            fit_kwargs.update(step_params)
-            transformer.fit(Xt, **fit_kwargs)
-
             if self.accepts_param(transformer.fit_transform, "groups"):
-                result = transformer.fit_transform(Xt, yt, groups=self.mask, **step_params)
+                result = transformer.fit_transform(
+                    Xt, yt, groups=self.mask, **step_params
+                )
             else:
                 result = transformer.fit_transform(Xt, yt, **step_params)
 
@@ -262,13 +212,10 @@ class SubjectPipeline(Pipeline):
             else:
                 Xt = result
 
-        # Keep the final metadata local to this fit call.
-        self._fit_groups_ = self.mask
         final_name = self.steps[-1][0]
         final_fit_params = fit_params_steps.get(final_name, {})
 
         return Xt, yt, final_fit_params
-
 
     def _transform_before_final(self, X, y):
         # FIX(ref): Replay metadata changes during inference instead of reusing
@@ -285,6 +232,6 @@ class SubjectPipeline(Pipeline):
 
         Xt, mask = self._transform_before_final(X, None)
         method = getattr(self._final_estimator, method_name)
-        if _declares_param(method, "groups"):
+        if self.accepts_param(method, "groups"):
             method_params.setdefault("groups", mask)
         return method(Xt, **method_params)

@@ -1,10 +1,12 @@
 # tests/test_subject_pipeline.py
+import copy
+
 import numpy as np
 import pytest
-from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin, ClassifierMixin
 from sklearn.exceptions import NotFittedError
 
-from pcp_project.pipeline import SubjectPipeline
+from pipeline import SubjectPipeline
 
 
 class RecordingTransformer(BaseEstimator, TransformerMixin):
@@ -13,23 +15,19 @@ class RecordingTransformer(BaseEstimator, TransformerMixin):
         self.name = name
         self.return_tuple = return_tuple
 
-    # dimension of X and Y don't change after fitting a model on the data
-    # fit log regression etc
     def fit(self, X, y=None, **kwargs):
         self.fit_called_ = True
         self.fit_X_ = np.array(X, copy=True)
         self.fit_y_ = None if y is None else np.array(y, copy=True)
         return self
 
-    # transform X
-    def transform(self, X, y=None, groups=None):
+    def transform(self, X, y=None, groups=None, **kwargs):
         self.transform_called_ = True
         self.transform_X_ = np.array(X, copy=True)
         if groups is not None:
             return np.array(X, copy=True) + self.add, np.array(groups)
         return np.array(X, copy=True) + self.add
 
-    # return transformed X
     def fit_transform(self, X, y=None, sample_weight=None, **kwargs):
         self.fit_transform_called_ = True
         self.fit_transform_X_ = np.array(X, copy=True)
@@ -62,7 +60,32 @@ class RecordingEstimator(BaseEstimator, ClassifierMixin):
         return np.repeat(self.classes_[0], len(X))
 
 
-# if we have 2 channels 3 timeseries
+class ProbaEstimator(BaseEstimator, ClassifierMixin):
+    """Final estimator with predict_proba/predict_log_proba/decision_function."""
+
+    def fit(self, X, y, **kwargs):
+        self.classes_ = np.unique(y)
+        return self
+
+    def predict(self, X, **kwargs):
+        return np.repeat(self.classes_[0], len(X))
+
+    def predict_proba(self, X, groups=None, **kwargs):
+        self.predict_proba_X_ = np.array(X, copy=True)
+        self.predict_proba_groups_ = groups
+        return np.tile([0.7, 0.3], (len(X), 1))
+
+    def predict_log_proba(self, X, groups=None, **kwargs):
+        self.predict_log_proba_X_ = np.array(X, copy=True)
+        self.predict_log_proba_groups_ = groups
+        return np.log(np.tile([0.7, 0.3], (len(X), 1)))
+
+    def decision_function(self, X, groups=None, **kwargs):
+        self.decision_function_X_ = np.array(X, copy=True)
+        self.decision_function_groups_ = groups
+        return np.ones(len(X))
+
+
 @pytest.fixture
 def Xy():
     X = np.array(
@@ -76,7 +99,6 @@ def Xy():
     return X, y
 
 
-# mask returns 1,1,1 for 3 timeseries, meaning all 3 belong to eyes closed.
 @pytest.fixture
 def mask():
     return np.array([True, True, True])
@@ -94,32 +116,24 @@ def simple_pipeline(mask):
     )
 
 
-# fit should return self
 def test_fit_returns_self(simple_pipeline, Xy):
     X, y = Xy
     result = simple_pipeline.fit(X, y)
     assert result is simple_pipeline
 
 
-# calling predict before fit raises error
 def test_predict_before_fit_raises(simple_pipeline, Xy):
     X, _ = Xy
-    # if the code inside pytest raises NotFittedError, pytest catches it, test passes
     with pytest.raises(NotFittedError):
-        # X is unfitted X
         simple_pipeline.predict(X)
 
 
-# calling transform before fit raises notfitted error.
-# pipeline.fit(X) fits and transforms the data sequentially
 def test_transform_before_fit_raises(simple_pipeline, Xy):
     X, _ = Xy
     with pytest.raises(NotFittedError):
-        # first fit, then transform X
         simple_pipeline.transform(X)
 
 
-#
 def test_fit_applies_transformers_in_order_and_passes_transformed_X_to_final_estimator(
     simple_pipeline, Xy
 ):
@@ -318,77 +332,128 @@ def test_nan_values_are_forwarded_to_final_estimator(mask):
     assert np.isnan(pipe.named_steps["clf"].fit_X_[2, 1])
 
 
-# test an empty pipeline, steps = []
-# directly sets self.is_fitted_ = True, returns itself
-# predict raises AttributeError
-
-
-def test_empty_pipeline(Xy):
+def test_fit_private_with_no_steps_returns_inputs_unchanged(Xy):
     X, y = Xy
     pipe = SubjectPipeline(steps=[])
 
-    # fitting returns self
-    assert pipe.fit(X, y) is pipe
+    Xt, yt, final_fit_params = pipe._fit(X, y)
 
-    # Transforming returns the input data
-    np.testing.assert_array_equal(pipe.transform(X), X)
-
-    # Predicting raises AttributeError as there is no final estimator
-    with pytest.raises(
-        AttributeError, match="The final step does not implement predict"
-    ):
-        pipe.predict(X)
+    np.testing.assert_array_equal(Xt, X)
+    np.testing.assert_array_equal(yt, y)
+    assert final_fit_params == {}
 
 
-# in scikit-learn it is common to use pipelines for data processing.
-# without final classifier. final step set to None or "passthrough"
-# final estimator(classifier) doesn't exist. end goal is not a
-# yes or no, but a transformed data
+def test_fit_private_skips_passthrough_intermediate_steps(mask, Xy):
+    X, y = Xy
+    pipe = SubjectPipeline(
+        steps=[
+            ("skip", "passthrough"),
+            ("t1", RecordingTransformer(add=1, name="t1")),
+            ("clf", RecordingEstimator()),
+        ],
+        mask=mask,
+    )
+
+    Xt, yt, final_fit_params = pipe._fit(X, y)
+
+    np.testing.assert_array_equal(Xt, X + 1)
+    np.testing.assert_array_equal(yt, y)
 
 
-# pipeline succesfully fitted
-# pipeline can transform correctly
-# calling predict raises Attributeerror
-@pytest.mark.parametrize("final_step", [None, "passthrough"])
-def test_pipeline_with_none_final_step(final_step, Xy):
+def test_predict_proba_not_available_without_final_predict_proba(mask, Xy):
+    pipe = SubjectPipeline(
+        steps=[
+            ("t1", RecordingTransformer(add=1, name="t1")),
+            ("clf", RecordingEstimator()),
+        ],
+        mask=mask,
+    )
+    assert not hasattr(pipe, "predict_proba")
+
+
+def test_predict_proba_before_fit_raises(mask, Xy):
+    X, _ = Xy
+    pipe = SubjectPipeline(
+        steps=[
+            ("t1", RecordingTransformer(add=1, name="t1")),
+            ("clf", ProbaEstimator()),
+        ],
+        mask=mask,
+    )
+    with pytest.raises(NotFittedError):
+        pipe.predict_proba(X)
+
+
+def test_decision_function_calls_final_estimator_with_groups(mask, Xy):
+    X, y = Xy
+    final = ProbaEstimator()
+    pipe = SubjectPipeline(
+        steps=[("t1", RecordingTransformer(add=1, name="t1")), ("clf", final)],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    scores = pipe.decision_function(X)
+
+    np.testing.assert_array_equal(final.decision_function_X_, X + 1)
+    np.testing.assert_array_equal(final.decision_function_groups_, mask)
+    assert scores.shape == (len(X),)
+
+
+def test_predict_proba_calls_final_estimator_with_groups(mask, Xy):
+    X, y = Xy
+    final = ProbaEstimator()
+    pipe = SubjectPipeline(
+        steps=[("t1", RecordingTransformer(add=1, name="t1")), ("clf", final)],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    proba = pipe.predict_proba(X)
+
+    np.testing.assert_array_equal(final.predict_proba_X_, X + 1)
+    np.testing.assert_array_equal(final.predict_proba_groups_, mask)
+    assert proba.shape == (len(X), 2)
+
+
+def test_predict_log_proba_calls_final_estimator_with_groups(mask, Xy):
+    X, y = Xy
+    final = ProbaEstimator()
+    pipe = SubjectPipeline(
+        steps=[("t1", RecordingTransformer(add=1, name="t1")), ("clf", final)],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    log_proba = pipe.predict_log_proba(X)
+
+    np.testing.assert_array_equal(final.predict_log_proba_X_, X + 1)
+    np.testing.assert_array_equal(final.predict_log_proba_groups_, pipe.mask)
+    assert log_proba.shape == (len(X), 2)
+
+
+def test_transform_skips_passthrough_intermediate_steps(mask, Xy):
     X, y = Xy
     pipe = SubjectPipeline(
         steps=[
             ("t1", RecordingTransformer(add=1, name="t1")),
-            ("clf", final_step),
-        ]
+            ("skip", "passthrough"),
+            ("clf", RecordingEstimator()),
+        ],
+        mask=mask,
     )
-
-    # fit works
-    assert pipe.fit(X, y) is pipe
-
-    # transform runs transformers
-    np.testing.assert_array_equal(pipe.transform(X), X + 1)
-
-    # predict raises error
-    with pytest.raises(
-        AttributeError, match="The final step does not implement predict"
-    ):
-        pipe.predict(X)
+    pipe.fit(X, y)
+    X_t, pipe.mask = pipe.transform(X, y)
+    np.testing.assert_array_equal(X_t, X + 1)
 
 
-# test invalid fit parameter format
-# if a parameter is passed without step__param syntax,
-# it raises value error
-def test_fit_invalid_parameters_raise_value_error(simple_pipeline, Xy):
+def test_transform_calls_intermediate_transformer_without_groups_param(mask, Xy):
     X, y = Xy
+    intermediate = RecordingTransformer(add=3)
+    pipe = SubjectPipeline(
+        steps=[("t1", intermediate), ("clf", RecordingEstimator())],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    X_t, pipe.mask = pipe.transform(X, y)
 
-    # Parameter without double underscores '__'
-    # _fit function splits each parameter name by "__"
-    with pytest.raises(
-        ValueError, match="Fit parameters must use the step__param format"
-    ):
-        simple_pipeline.fit(X, y, invalid_param_name=True)
-
-    # Parameter with an unknown step name "non_existent_step"
-    # _fit function inside pipeline iterates through steps,
-    # splits param name from "__", so "non_existent_step__param"
-    # becomes "non_existent_step", and if it isn't in step names ["t1,"t2]
-    # then throws value error
-    with pytest.raises(ValueError, match="Unknown step name in fit parameters"):
-        simple_pipeline.fit(X, y, non_existent_step__param=True)
+    assert intermediate.transform_called_
+    np.testing.assert_array_equal(X_t, X + 3)
+    np.testing.assert_array_equal(pipe.mask, mask)

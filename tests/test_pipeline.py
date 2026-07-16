@@ -1,11 +1,9 @@
-# tests/test_subject_pipeline.py
-import copy
+# tests/test_pipeline.py
 
 import numpy as np
 import pytest
-from sklearn.base import BaseEstimator, TransformerMixin, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.exceptions import NotFittedError
-
 from pipeline import SubjectPipeline
 
 
@@ -58,6 +56,32 @@ class RecordingEstimator(BaseEstimator, ClassifierMixin):
         self.predict_X_ = np.array(X, copy=True)
         self.predict_kwargs_ = kwargs
         return np.repeat(self.classes_[0], len(X))
+
+
+class ProbaEstimator(BaseEstimator, ClassifierMixin):
+    """Final estimator with predict_proba/predict_log_proba/decision_function."""
+
+    def fit(self, X, y, **kwargs):
+        self.classes_ = np.unique(y)
+        return self
+
+    def predict(self, X, **kwargs):
+        return np.repeat(self.classes_[0], len(X))
+
+    def predict_proba(self, X, groups=None, **kwargs):
+        self.predict_proba_X_ = np.array(X, copy=True)
+        self.predict_proba_groups_ = groups
+        return np.tile([0.7, 0.3], (len(X), 1))
+
+    def predict_log_proba(self, X, groups=None, **kwargs):
+        self.predict_log_proba_X_ = np.array(X, copy=True)
+        self.predict_log_proba_groups_ = groups
+        return np.log(np.tile([0.7, 0.3], (len(X), 1)))
+
+    def decision_function(self, X, groups=None, **kwargs):
+        self.decision_function_X_ = np.array(X, copy=True)
+        self.decision_function_groups_ = groups
+        return np.ones(len(X))
 
 
 @pytest.fixture
@@ -304,3 +328,130 @@ def test_nan_values_are_forwarded_to_final_estimator(mask):
     assert np.isnan(pipe.named_steps["clf"].fit_X_[1, 1])
     assert np.isnan(pipe.named_steps["clf"].fit_X_[2, 0])
     assert np.isnan(pipe.named_steps["clf"].fit_X_[2, 1])
+
+
+def test_fit_private_with_no_steps_returns_inputs_unchanged(Xy):
+    X, y = Xy
+    pipe = SubjectPipeline(steps=[])
+
+    Xt, yt, final_fit_params = pipe._fit(X, y)
+
+    np.testing.assert_array_equal(Xt, X)
+    np.testing.assert_array_equal(yt, y)
+    assert final_fit_params == {}
+
+
+def test_fit_private_skips_passthrough_intermediate_steps(mask, Xy):
+    X, y = Xy
+    pipe = SubjectPipeline(
+        steps=[
+            ("skip", "passthrough"),
+            ("t1", RecordingTransformer(add=1, name="t1")),
+            ("clf", RecordingEstimator()),
+        ],
+        mask=mask,
+    )
+
+    Xt, yt, final_fit_params = pipe._fit(X, y)
+
+    np.testing.assert_array_equal(Xt, X + 1)
+    np.testing.assert_array_equal(yt, y)
+
+
+def test_predict_proba_not_available_without_final_predict_proba(mask, Xy):
+    pipe = SubjectPipeline(
+        steps=[
+            ("t1", RecordingTransformer(add=1, name="t1")),
+            ("clf", RecordingEstimator()),
+        ],
+        mask=mask,
+    )
+    assert not hasattr(pipe, "predict_proba")
+
+
+def test_predict_proba_before_fit_raises(mask, Xy):
+    X, _ = Xy
+    pipe = SubjectPipeline(
+        steps=[
+            ("t1", RecordingTransformer(add=1, name="t1")),
+            ("clf", ProbaEstimator()),
+        ],
+        mask=mask,
+    )
+    with pytest.raises(NotFittedError):
+        pipe.predict_proba(X)
+
+
+def test_decision_function_calls_final_estimator_with_groups(mask, Xy):
+    X, y = Xy
+    final = ProbaEstimator()
+    pipe = SubjectPipeline(
+        steps=[("t1", RecordingTransformer(add=1, name="t1")), ("clf", final)],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    scores = pipe.decision_function(X)
+
+    np.testing.assert_array_equal(final.decision_function_X_, X + 1)
+    np.testing.assert_array_equal(final.decision_function_groups_, mask)
+    assert scores.shape == (len(X),)
+
+
+def test_predict_proba_calls_final_estimator_with_groups(mask, Xy):
+    X, y = Xy
+    final = ProbaEstimator()
+    pipe = SubjectPipeline(
+        steps=[("t1", RecordingTransformer(add=1, name="t1")), ("clf", final)],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    proba = pipe.predict_proba(X)
+
+    np.testing.assert_array_equal(final.predict_proba_X_, X + 1)
+    np.testing.assert_array_equal(final.predict_proba_groups_, mask)
+    assert proba.shape == (len(X), 2)
+
+
+def test_predict_log_proba_calls_final_estimator_with_groups(mask, Xy):
+    X, y = Xy
+    final = ProbaEstimator()
+    pipe = SubjectPipeline(
+        steps=[("t1", RecordingTransformer(add=1, name="t1")), ("clf", final)],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    log_proba = pipe.predict_log_proba(X)
+
+    np.testing.assert_array_equal(final.predict_log_proba_X_, X + 1)
+    np.testing.assert_array_equal(final.predict_log_proba_groups_, pipe.mask)
+    assert log_proba.shape == (len(X), 2)
+
+
+def test_transform_skips_passthrough_intermediate_steps(mask, Xy):
+    X, y = Xy
+    pipe = SubjectPipeline(
+        steps=[
+            ("t1", RecordingTransformer(add=1, name="t1")),
+            ("skip", "passthrough"),
+            ("clf", RecordingEstimator()),
+        ],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    X_t, pipe.mask = pipe.transform(X, y)
+    np.testing.assert_array_equal(X_t, X + 1)
+
+
+def test_transform_calls_intermediate_transformer_without_groups_param(mask, Xy):
+    X, y = Xy
+    intermediate = RecordingTransformer(add=3)
+    pipe = SubjectPipeline(
+        steps=[("t1", intermediate), ("clf", RecordingEstimator())],
+        mask=mask,
+    )
+    pipe.fit(X, y)
+    X_t, pipe.mask = pipe.transform(X, y)
+
+    assert intermediate.transform_called_
+    np.testing.assert_array_equal(X_t, X + 3)
+    np.testing.assert_array_equal(pipe.mask, mask)
